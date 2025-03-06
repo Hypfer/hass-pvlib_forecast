@@ -1,0 +1,11 @@
+"""Constants for the PVLib Solar Forecast integration."""
+DOMAIN = "pvlib_forecast"
+CONF_ALTITUDE = "altitude"
+CONF_SYSTEM_KW = "system_kw"
+CONF_TILT = "tilt"
+CONF_AZIMUTH = "azimuth"
+CONF_EFFICIENCY = "efficiency"
+CONF_MAX_INVERTER_POWER = "max_inverter_power"
+
+CONF_WEATHER_ENTITY = "weather_entity"
+CONF_SYSTEM_NAME = "system_name"

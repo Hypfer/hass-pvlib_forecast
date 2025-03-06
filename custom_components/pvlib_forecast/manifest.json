@@ -1,0 +1,11 @@
+{
+    "domain": "pvlib_forecast",
+    "name": "PVLib Solar Forecast",
+    "documentation": "",
+    "dependencies": ["weather"],
+    "requirements": ["pvlib @ git+https://github.com/Hypfer/pvlib-python.git@pyfive"],
+    "codeowners": [],
+    "config_flow": true,
+    "version": "0.1.0",
+    "integration_type": "service"
+}
