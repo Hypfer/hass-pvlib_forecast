@@ -1,25 +1,28 @@
 """PVLib Solar Forecast coordinator."""
 from datetime import datetime, timedelta
 import logging
+from typing import Any, Dict, List
+
 import pandas as pd
 import pvlib
+from pvlib import irradiance
+
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.components.weather import WeatherEntityFeature
 from homeassistant.const import CONF_LATITUDE, CONF_LONGITUDE
+from homeassistant.config_entries import ConfigEntry
+
 from .pvlib_misc import adjust_clearsky
 
-from pvlib import irradiance
-
 from .weather_cache import WeatherDataCache
-
 from .const import (
     DOMAIN,
     CONF_ALTITUDE,
-    CONF_SYSTEM_KW,
+    CONF_INSTALLED_KW,
     CONF_TILT,
     CONF_AZIMUTH,
     CONF_EFFICIENCY,
-    CONF_MAX_INVERTER_POWER,
+    CONF_INVERTER_KW,
     CONF_WEATHER_ENTITY,
     CONF_SYSTEM_NAME,
 )
@@ -27,7 +30,8 @@ from .const import (
 LOGGER = logging.getLogger(__name__)
 
 
-def _create_synthetic_hourly_entries(daily_forecast_list):
+def _create_synthetic_hourly_entries(daily_forecast_list: List[Dict]) -> List[Dict]:
+    """Create synthetic hourly entries from daily forecast data."""
     hourly_forecast_list = []
     for daily in daily_forecast_list:
         date = pd.Timestamp(daily['datetime'])
@@ -42,7 +46,10 @@ def _create_synthetic_hourly_entries(daily_forecast_list):
 
 
 class PVLibForecastCoordinator(DataUpdateCoordinator):
-    def __init__(self, hass, entry):
+    """Coordinator for PVLib solar forecasts."""
+
+    def __init__(self, hass, entry: ConfigEntry) -> None:
+        """Initialize coordinator."""
         super().__init__(
             hass,
             LOGGER,
@@ -50,19 +57,23 @@ class PVLibForecastCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(minutes=30),
         )
         self.hass = hass
+        # Configuration parameters that don't change
         self.latitude = entry.data[CONF_LATITUDE]
         self.longitude = entry.data[CONF_LONGITUDE]
         self.altitude = entry.data[CONF_ALTITUDE]
-        self.system_kw = entry.data[CONF_SYSTEM_KW]
-        self.tilt = entry.data[CONF_TILT]
-        self.azimuth = entry.data[CONF_AZIMUTH]
-        self.efficiency = entry.data[CONF_EFFICIENCY]
-        self.max_inverter_power = entry.data.get(CONF_MAX_INVERTER_POWER)
-        self.weather_entity = entry.data.get(CONF_WEATHER_ENTITY)
         self.system_name = entry.data[CONF_SYSTEM_NAME]
+
+        # Adjustable parameters from options
+        self.installed_kw = entry.options.get(CONF_INSTALLED_KW, entry.data[CONF_INSTALLED_KW])
+        self.tilt = entry.options.get(CONF_TILT, entry.data[CONF_TILT])
+        self.azimuth = entry.options.get(CONF_AZIMUTH, entry.data[CONF_AZIMUTH])
+        self.efficiency = entry.options.get(CONF_EFFICIENCY, entry.data[CONF_EFFICIENCY])
+        self.inverter_kw = entry.options.get(CONF_INVERTER_KW, entry.data.get(CONF_INVERTER_KW))
+        self.weather_entity = entry.options.get(CONF_WEATHER_ENTITY, entry.data.get(CONF_WEATHER_ENTITY))
+
         self.weather_cache = WeatherDataCache()
 
-    async def _async_update_data(self):
+    async def _async_update_data(self) -> Dict[str, Any]:
         """Calculate forecast data and manage weather data cache."""
 
         times = pd.date_range(
@@ -108,7 +119,6 @@ class PVLibForecastCoordinator(DataUpdateCoordinator):
                     blocking=True,
                     return_response=True
                 )
-                #LOGGER.debug("Forecast data received: %s", forecast_data)
 
                 if forecast_data and self.weather_entity in forecast_data:
                     forecast_list = forecast_data[self.weather_entity]['forecast']
@@ -119,7 +129,6 @@ class PVLibForecastCoordinator(DataUpdateCoordinator):
                         forecast_list = _create_synthetic_hourly_entries(forecast_list)
 
                     self.weather_cache.upsert(pd.DataFrame(forecast_list))
-                    #LOGGER.debug("Weather cache updated with: %s", forecast_list)
 
                 cached_weather_data = self.weather_cache.get_data()
                 LOGGER.debug("Cached weather data:\n%s", cached_weather_data)
@@ -137,7 +146,8 @@ class PVLibForecastCoordinator(DataUpdateCoordinator):
 
                 LOGGER.debug("Total timestamps in cloud_cover: %d", len(cloud_cover))
                 LOGGER.debug("Total timestamps in cached_weather_data: %d", len(cached_weather_data))
-                LOGGER.debug("Matched Entries: %d. Unmatched timestamps: %d", len(cached_weather_data) - unmatched_entries, unmatched_entries)
+                LOGGER.debug("Matched Entries: %d. Unmatched timestamps: %d",
+                           len(cached_weather_data) - unmatched_entries, unmatched_entries)
 
                 LOGGER.debug("Computed cloud cover series:\n%s", cloud_cover)
 
@@ -165,10 +175,11 @@ class PVLibForecastCoordinator(DataUpdateCoordinator):
         )
         LOGGER.debug("POA Irradiance:\n%s", poa_irradiance)
 
-        dc_power = poa_irradiance['poa_global'] * self.system_kw * self.efficiency
+        dc_power = poa_irradiance['poa_global'] * self.installed_kw * self.efficiency
 
-        if self.max_inverter_power is not None:
-            dc_power = dc_power.clip(lower=0, upper=self.max_inverter_power)
+        if self.inverter_kw is not None:
+            max_inverter_watts = self.inverter_kw * 1000
+            dc_power = dc_power.clip(lower=0, upper=max_inverter_watts)
 
         wh_period = dc_power.to_dict()
         LOGGER.debug("Calculated DC power:\n%s", dc_power)
